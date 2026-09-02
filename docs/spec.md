@@ -36,6 +36,7 @@ Proposed files:
 - `<store>/media/...` — downloaded media (optional, on-demand or background).
 - `<store>/LOCK` — store lock to prevent concurrent access.
 - `<store>/HEARTBEAT` — last observed sync follow activity timestamp (RFC 3339), written by `sync --follow` at most once per minute. Permissions `0600`. Lets `doctor` and external watchdogs inspect local follow activity; it is not a process-liveness or keepalive-health marker.
+- `<store>/webhook-failed.ndjson` — compact grok-mode webhook JSON that failed to POST (permissions `0600`). Drain this file; do not poll `wacli.db` as a wake path. The sender key is never written here.
 
 Rationale for two SQLite files: reduce coupling and keep the `whatsmeow`-owned schema separate from `wacli`’s local schema. It’s still “one store directory” for the user.
 
@@ -178,16 +179,21 @@ combined with `--account`.
 
 ### Sync
 
-- `wacli sync [--once] [--follow] [--stale-threshold DURATION] [--download-media] [--webhook URL] [--webhook-secret SECRET] [--webhook-events LIST]`
+- `wacli sync [--once] [--follow] [--stale-threshold DURATION] [--download-media] [--webhook URL] [--webhook-secret SECRET] [--webhook-auth hmac|grok] [--webhook-chat JID] [--webhook-filter REGEXP] [--webhook-include-from-me] [--webhook-events LIST]`
 
 Notes:
 
 - `sync` errors if not authenticated (never prints QR).
 - `--download-media` runs a bounded/concurrent media downloader for messages that contain downloadable media metadata.
 - `--webhook` posts live message JSON after successful local storage on a bounded background worker.
-- `--webhook-secret` adds an HMAC-SHA256 `X-Wacli-Signature` header and requires `--webhook`.
-- `--webhook-events` selects which event types are posted (`message`, `receipt`, `chat_presence`; default `message`) and requires `--webhook`. Receipt and chat-presence payloads carry a flat `EventType` discriminator; legacy message payloads omit it.
-- Webhook failures and full-queue drops emit warnings but do not fail sync.
+- `--webhook-secret` is the HMAC secret (`hmac` mode) or Grok Bot sender key (`grok` mode) and requires `--webhook`. Never logged. Also `WACLI_WEBHOOK_SECRET`.
+- `--webhook-auth hmac|grok` selects the POST contract (default `hmac`). `grok` uses `Authorization: Bearer` and `X-Automation-Key`, an 8s timeout, HTTP 200, and a compact payload under 4000 characters. Also `WACLI_WEBHOOK_AUTH`.
+- `--webhook-chat` limits posts to one chat JID or phone (required for `grok`; PN and LID forms both match). Also `WACLI_WEBHOOK_CHAT`.
+- `--webhook-filter` is a Go RE2 pattern compiled before connect; omitted matches all messages in the selected chat. Also `WACLI_WEBHOOK_FILTER`.
+- `--webhook-include-from-me` opts `grok` mode into posting self-messages.
+- `--webhook-events` selects which event types are posted (`message`, `receipt`, `chat_presence`; default `message`) and requires `--webhook`. Receipt and chat-presence payloads carry a flat `EventType` discriminator; legacy message payloads omit it. `grok` mode posts `message` only.
+- Webhook failures and full-queue drops emit warnings but do not fail sync. `grok` failures also append the compact JSON to `<store>/webhook-failed.ndjson` (`0600`) with no retry.
+- History sync and backfill do not POST.
 
 ### History backfill (best-effort)
 

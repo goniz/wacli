@@ -27,6 +27,31 @@ var syncWebhookEventKinds = []SyncWebhookEventKind{
 	SyncWebhookEventChatPresence,
 }
 
+// SyncWebhookAuth selects how live webhook POSTs are authenticated.
+// The zero value is HMAC so existing --webhook consumers stay unchanged.
+type SyncWebhookAuth string
+
+const (
+	SyncWebhookAuthHMAC SyncWebhookAuth = "hmac"
+	SyncWebhookAuthGrok SyncWebhookAuth = "grok"
+)
+
+// ParseSyncWebhookAuth parses --webhook-auth. Empty means hmac.
+func ParseSyncWebhookAuth(raw string) (SyncWebhookAuth, error) {
+	switch SyncWebhookAuth(strings.ToLower(strings.TrimSpace(raw))) {
+	case "", SyncWebhookAuthHMAC:
+		return SyncWebhookAuthHMAC, nil
+	case SyncWebhookAuthGrok:
+		return SyncWebhookAuthGrok, nil
+	default:
+		return "", fmt.Errorf("--webhook-auth must be one of: hmac, grok")
+	}
+}
+
+func (a SyncWebhookAuth) IsGrok() bool {
+	return a == SyncWebhookAuthGrok
+}
+
 // SyncWebhookEventSet is the set of event kinds the webhook forwards. The zero
 // value forwards messages only.
 type SyncWebhookEventSet map[SyncWebhookEventKind]bool

@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"regexp"
 	"strings"
 	"sync/atomic"
 	"time"
@@ -57,28 +58,33 @@ func (m SyncPresenceMode) SendsAvailablePresence() bool {
 }
 
 type SyncOptions struct {
-	Mode                SyncMode
-	PresenceMode        SyncPresenceMode
-	AllowQR             bool
-	OnQRCode            func(string)
-	PairPhoneNumber     string
-	OnPairCode          func(string)
-	AfterConnect        func(context.Context) error
-	DownloadMedia       bool
-	RefreshContacts     bool
-	RefreshGroups       bool
-	RefreshChannels     bool
-	IdleExit            time.Duration // only used for bootstrap/once
-	MaxReconnect        time.Duration // max time to attempt reconnection before giving up (0 = unlimited)
-	StaleThreshold      time.Duration // force reconnect when keepalive failures last this long in follow mode (0 = disabled)
-	MaxMessages         int64         // 0 = unlimited
-	MaxDBSizeBytes      int64         // 0 = unlimited
-	WarnNoLimits        bool
-	WebhookURL          string
-	WebhookSecret       string
-	WebhookAllowPrivate bool
-	WebhookEvents       SyncWebhookEventSet // nil = messages only
-	Verbosity           int                 // future
+	Mode                 SyncMode
+	PresenceMode         SyncPresenceMode
+	AllowQR              bool
+	OnQRCode             func(string)
+	PairPhoneNumber      string
+	OnPairCode           func(string)
+	AfterConnect         func(context.Context) error
+	DownloadMedia        bool
+	RefreshContacts      bool
+	RefreshGroups        bool
+	RefreshChannels      bool
+	IdleExit             time.Duration // only used for bootstrap/once
+	MaxReconnect         time.Duration // max time to attempt reconnection before giving up (0 = unlimited)
+	StaleThreshold       time.Duration // force reconnect when keepalive failures last this long in follow mode (0 = disabled)
+	MaxMessages          int64         // 0 = unlimited
+	MaxDBSizeBytes       int64         // 0 = unlimited
+	WarnNoLimits         bool
+	WebhookURL           string
+	WebhookSecret        string
+	WebhookAllowPrivate  bool
+	WebhookEvents        SyncWebhookEventSet // nil = messages only
+	WebhookAuth          SyncWebhookAuth     // empty = hmac
+	WebhookChat          string
+	WebhookChatJIDs      []string // resolved PN and LID forms; empty = all chats
+	WebhookFilter        *regexp.Regexp
+	WebhookIncludeFromMe bool
+	Verbosity            int // future
 }
 
 type SyncResult struct {
@@ -117,6 +123,9 @@ func (a *App) Sync(ctx context.Context, opts SyncOptions) (SyncResult, error) {
 	limits := &syncStorageLimits{app: a, opts: opts, cancel: cancel}
 
 	if err := a.OpenWA(); err != nil {
+		return SyncResult{}, err
+	}
+	if err := a.prepareSyncWebhook(syncCtx, &opts); err != nil {
 		return SyncResult{}, err
 	}
 	if opts.Mode == SyncModeFollow && opts.StaleThreshold > 0 {
