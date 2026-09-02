@@ -152,14 +152,22 @@ func (a *App) postSyncWebhookEvent(ctx context.Context, opts SyncOptions, evt sy
 	if webhookURL == "" {
 		return nil
 	}
-	ctx, cancel := context.WithTimeout(ctx, syncWebhookRequestTimeout)
-	defer cancel()
-	payload, err := json.Marshal(a.newSyncWebhookEventPayload(ctx, evt))
-	if err != nil {
-		return fmt.Errorf("marshal webhook payload: %w", err)
+	if opts.WebhookAuth.IsGrok() && evt.Kind != "" && evt.Kind != SyncWebhookEventMessage {
+		return nil
 	}
-	req, err := newSyncWebhookRequest(ctx, webhookURL, opts.WebhookSecret, a.Version(), payload)
+	timeout := syncWebhookRequestTimeout
+	if opts.WebhookAuth.IsGrok() {
+		timeout = syncWebhookGrokRequestTimeout
+	}
+	ctx, cancel := context.WithTimeout(ctx, timeout)
+	defer cancel()
+	payload, err := a.marshalSyncWebhookPayload(ctx, opts, evt)
 	if err != nil {
+		return err
+	}
+	req, err := newSyncWebhookRequest(ctx, webhookURL, opts.WebhookSecret, a.Version(), payload, opts.WebhookAuth)
+	if err != nil {
+		a.recordGrokWebhookFailure(opts, payload)
 		return err
 	}
 	client := syncWebhookSafeHTTPClient
@@ -168,14 +176,27 @@ func (a *App) postSyncWebhookEvent(ctx context.Context, opts SyncOptions, evt sy
 	}
 	resp, err := client.Do(req)
 	if err != nil {
+		a.recordGrokWebhookFailure(opts, payload)
 		return fmt.Errorf("post webhook %s: %s", redactedWebhookURL(webhookURL), redactWebhookError(webhookURL, err))
 	}
 	defer resp.Body.Close()
 	_, _ = io.Copy(io.Discard, resp.Body)
-	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+	if !webhookHTTPSuccess(opts, resp.StatusCode) {
+		a.recordGrokWebhookFailure(opts, payload)
 		return fmt.Errorf("post webhook: %s", resp.Status)
 	}
 	return nil
+}
+
+func (a *App) marshalSyncWebhookPayload(ctx context.Context, opts SyncOptions, evt syncWebhookEvent) ([]byte, error) {
+	if opts.WebhookAuth.IsGrok() {
+		return fitGrokWebhookJSON(a.newGrokWebhookPayload(ctx, evt.Message))
+	}
+	payload, err := json.Marshal(a.newSyncWebhookEventPayload(ctx, evt))
+	if err != nil {
+		return nil, fmt.Errorf("marshal webhook payload: %w", err)
+	}
+	return payload, nil
 }
 
 func (a *App) newSyncWebhookEventPayload(ctx context.Context, evt syncWebhookEvent) any {
@@ -258,7 +279,7 @@ func (a *App) canonicalWebhookJIDString(ctx context.Context, raw string) string 
 	return a.canonicalWebhookJID(ctx, jid).String()
 }
 
-func newSyncWebhookRequest(ctx context.Context, webhookURL, secret, version string, payload []byte) (*http.Request, error) {
+func newSyncWebhookRequest(ctx context.Context, webhookURL, secret, version string, payload []byte, auth SyncWebhookAuth) (*http.Request, error) {
 	if err := validateWebhookURL(webhookURL); err != nil {
 		return nil, err
 	}
@@ -268,7 +289,15 @@ func newSyncWebhookRequest(ctx context.Context, webhookURL, secret, version stri
 	}
 	req.Header.Set("Content-Type", "application/json")
 	req.Header.Set("User-Agent", "wacli/"+version)
-	if strings.TrimSpace(secret) != "" {
+	secret = strings.TrimSpace(secret)
+	if auth.IsGrok() {
+		if secret != "" {
+			req.Header.Set("Authorization", "Bearer "+secret)
+			req.Header.Set("X-Automation-Key", secret)
+		}
+		return req, nil
+	}
+	if secret != "" {
 		req.Header.Set("X-Wacli-Signature", syncWebhookSignature(secret, payload))
 	}
 	return req, nil

@@ -533,13 +533,17 @@ func (a *App) handleLiveSyncMessage(ctx context.Context, opts SyncOptions, v *ev
 	if pm.ReactionToID != "" && pm.ReactionEmoji == "" && v.Message != nil && v.Message.GetEncReactionMessage() != nil {
 		a.decryptEncryptedReaction(ctx, &pm, v)
 	}
+	existed := false
+	if opts.WebhookAuth.IsGrok() {
+		existed = a.liveMessageExists(ctx, pm)
+	}
 	incrementUnread := a.shouldIncrementLiveUnread(ctx, pm)
 	if err := a.storeParsedMessageForSync(ctx, pm, limits...); err == nil {
 		if incrementUnread {
 			a.incrementLiveUnread(ctx, pm)
 		}
 		a.emitSyncProgress(messagesStored.Add(1))
-		if enqueueWebhook != nil {
+		if enqueueWebhook != nil && !existed && a.shouldEnqueueWebhookMessage(ctx, opts, pm) {
 			enqueueWebhook(pm)
 		}
 		sideEffectCtx := ctx

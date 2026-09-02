@@ -8,7 +8,7 @@ Read when: building a local analytics, search, CRM, or agent-side companion tool
 
 - Use `--json` for one-shot command output from `chats`, `contacts`, `groups`, `messages`, `calls`, and `doctor`.
 - Use `--events` for line-delimited lifecycle events from long-running `auth`, `sync`, and `history backfill` commands.
-- Use `sync --webhook` for live-message delivery to another process or service.
+- Use `sync --webhook` for live-message delivery to another process or service. Default `--webhook-auth hmac` posts the established signed payload. `--webhook-auth grok` posts a compact JSON object to a Grok Bot automation URL (Bearer + `X-Automation-Key`, 8s, no retry, HTTP 200). Grok Bot drops bodies over 4000 characters; wacli truncates `text` to stay under that. Failed grok POSTs append the same JSON to `<store>/webhook-failed.ndjson`.
 - Use a read-only SQLite connection to `<store>/wacli.db` for local analytics that need joins, cursors, or incremental scans.
 
 Prefer the CLI or webhook when possible. Direct SQLite reads are powerful, but the schema can evolve between releases.

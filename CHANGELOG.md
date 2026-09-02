@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+### Added
+
+- Sync: add `--webhook-auth grok` for compact Grok Bot live-message POSTs with Bearer + `X-Automation-Key`, chat/regex filters, a 4k payload budget, and a `webhook-failed.ndjson` fallback. HMAC `--webhook` behavior is unchanged.
+
 ### Fixed
 
 - CLI: keep successful JSON commands successful when a pipe reader closes early, including Unix stdout SIGPIPE and Windows closed-pipe errors. (#366 - thanks @SebTardif)
